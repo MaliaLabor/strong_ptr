@@ -326,6 +326,162 @@ boost::ut::suite<"strong_ptr_only_test"> strong_ptr_only_test = []() {
       << "Static object should still be accessible after strong_ptr "
          "destruction";
   };
+
+  "get_allocator_for_dynamic_allocation"_test = [&] {
+    // Create a dynamically allocated strong_ptr
+    auto ptr = make_strong_ptr<test_class>(test_allocator, 42);
+
+    // Get the allocator
+    auto* allocator = ptr.get_allocator();
+
+    // Verify the allocator matches the one used for creation
+    expect(that % test_allocator == allocator)
+      << "Allocator should match the one used for creation";
+
+    // Verify it's not nullptr for dynamically allocated objects
+    expect(allocator != nullptr)
+      << "Allocator should not be nullptr for dynamically allocated objects";
+
+    // Test that copies return the same allocator
+    auto ptr_copy = ptr;
+    expect(that % test_allocator == ptr_copy.get_allocator())
+      << "Copied strong_ptr should return the same allocator";
+  };
+
+  "get_allocator_for_static_allocation"_test = [&] {
+    // Create a static object (using int to avoid affecting test_class instance
+    // count)
+    static int static_obj = 777;
+
+    // Create strong_ptr to static object using unsafe_assume_static_tag
+    strong_ptr<int> ptr(mem::unsafe_assume_static_tag{}, static_obj);
+
+    // Get the allocator
+    auto* allocator = ptr.get_allocator();
+
+    // Verify the allocator is nullptr for statically allocated objects
+    expect(allocator == nullptr)
+      << "Allocator should be nullptr for statically allocated objects";
+
+    // Test that copies also return nullptr
+    auto ptr_copy = ptr;
+    expect(ptr_copy.get_allocator() == nullptr)
+      << "Copied static strong_ptr should also return nullptr allocator";
+  };
+
+  "get_allocator_for_aliased_ptr"_test = [&] {
+    // Create a class with internal structure
+    struct outer_class
+    {
+      test_class inner;
+      std::array<test_class, 2> array_inner;
+      explicit outer_class(int p_value)
+        : inner(p_value)
+        , array_inner{ test_class{ p_value }, test_class{ p_value } }
+      {
+      }
+    };
+
+    // Create the outer object with a specific allocator
+    auto outer = make_strong_ptr<outer_class>(test_allocator, 42);
+
+    // Create aliases to inner members
+    strong_ptr<test_class> inner_alias(outer, &outer_class::inner);
+    strong_ptr<test_class> array_alias(outer, &outer_class::array_inner, 0);
+
+    // Verify all aliases return the same allocator as the parent
+    expect(that % test_allocator == outer.get_allocator())
+      << "Outer strong_ptr should return the original allocator";
+
+    expect(that % test_allocator == inner_alias.get_allocator())
+      << "Inner alias should return the same allocator as parent";
+
+    expect(that % test_allocator == array_alias.get_allocator())
+      << "Array alias should return the same allocator as parent";
+
+    // Verify they all return the same allocator instance
+    expect(outer.get_allocator() == inner_alias.get_allocator())
+      << "Outer and inner alias should share the same allocator";
+
+    expect(outer.get_allocator() == array_alias.get_allocator())
+      << "Outer and array alias should share the same allocator";
+  };
+
+  "get_allocator_for_polymorphic_ptr"_test = [&] {
+    // Create a derived class object
+    auto derived = make_strong_ptr<derived_class>(test_allocator, 99);
+
+    // Convert to base class pointer
+    strong_ptr<base_class> base = derived;
+
+    // Both should return the same allocator
+    expect(that % test_allocator == derived.get_allocator())
+      << "Derived strong_ptr should return the original allocator";
+
+    expect(that % test_allocator == base.get_allocator())
+      << "Base strong_ptr should return the same allocator";
+
+    expect(derived.get_allocator() == base.get_allocator())
+      << "Derived and base pointers should share the same allocator";
+  };
+};
+
+boost::ut::suite<"monotonic_allocator_test"> monotonic_allocator_test = []() {
+  using namespace boost::ut;
+  "assignment_test"_test = [&] {
+    auto allocator = monotonic_allocator<32>();
+
+    auto ptr1 = allocator.allocate(sizeof(char), alignof(char));
+    auto char_ptr = static_cast<char*>(ptr1);
+    *char_ptr = 'a';
+
+    auto ptr2 =
+      allocator.allocate(sizeof(std::uint32_t), alignof(std::uint32_t));
+    auto int_ptr = static_cast<int*>(ptr2);
+    *int_ptr = 1;
+
+    expect(that % 1 == *int_ptr) << "Int assignment failed.\n";
+    expect(that % 'a' == *char_ptr) << "char assignment failed.\n";
+    allocator.deallocate(ptr2, sizeof(std::uint32_t));
+    allocator.deallocate(ptr1, sizeof(char));
+  };
+
+// NOTE: Abort testing does not work on Windows
+#if not defined(_WIN32) and not defined(_WIN64)
+  "termination_test"_test = [&] {
+    expect(aborts([] {
+      auto allocator = monotonic_allocator<32>();
+      [[maybe_unused]] auto ptr =
+        allocator.allocate(sizeof(std::uint32_t), alignof(std::uint32_t));
+    }))
+      << "std::terminate not called.\n";
+  };
+#endif
+
+  "max_buffer_test"_test = [&] {
+    auto allocator = monotonic_allocator<8>();
+    auto ptr1 =
+      allocator.allocate(sizeof(std::uint32_t), alignof(std::uint32_t));
+    auto int_ptr1 = static_cast<int*>(ptr1);
+    *int_ptr1 = 1;
+
+    auto ptr2 =
+      allocator.allocate(sizeof(std::uint32_t), alignof(std::uint32_t));
+    auto int_ptr2 = static_cast<int*>(ptr2);
+    *int_ptr2 = 2;
+
+    expect(that % 1 == *int_ptr1) << "Int assignment failed.\n";
+    expect(that % 2 == *int_ptr2) << "Int assignment failed.\n";
+
+    expect(throws<std::bad_alloc>([&] {
+      [[maybe_unused]] auto ptr3 =
+        allocator.allocate(sizeof(std::uint32_t), alignof(std::uint32_t));
+    }))
+      << "Exception not thrown when bad alloc happens.\n";
+
+    allocator.deallocate(ptr1, sizeof(std::uint32_t));
+    allocator.deallocate(ptr2, sizeof(std::uint32_t));
+  };
 };
 
 boost::ut::suite<"monotonic_allocator_test"> monotonic_allocator_test = []() {

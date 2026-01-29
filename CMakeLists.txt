@@ -17,6 +17,7 @@ cmake_minimum_required(VERSION 4.0)
 # Generate compile commands for anyone using our libraries.
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_COLOR_DIAGNOSTICS ON)
+set(CMAKE_CXX_SCAN_FOR_MODULES ON)
 
 project(strong_ptr LANGUAGES CXX)
 
@@ -33,6 +34,16 @@ target_sources(strong_ptr PUBLIC
     TYPE CXX_MODULES
     FILES modules/strong_ptr.cppm
 )
+
+target_compile_options(strong_ptr PRIVATE
+    -g
+    -Werror
+    -Wno-unused-command-line-argument
+    -Wall
+    -Wextra
+    -Wshadow
+    -fexceptions
+    -fno-rtti)
 
 install(
     TARGETS strong_ptr
@@ -78,10 +89,13 @@ else()
     target_compile_options(strong_ptr_unit_test PUBLIC
         -g
         -Werror
+        -Wno-unused-command-line-argument
         -Wall
         -Wextra
         -Wshadow
         -pedantic
+        -fexceptions
+        -fno-rtti
     )
 
     # Enable ASAN only on non-Windows platforms (Windows doesn't support it)
